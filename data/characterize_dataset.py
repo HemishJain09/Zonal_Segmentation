@@ -53,8 +53,8 @@ def find_modality_files(picai_dir: Path):
     
     # Try common folder names
     t2_candidates = ["t2w", "t2", "T2W", "T2"]
-    adc_candidates = ["adc", "ADC"]
-    hbv_candidates = ["hbv", "HBV", "highbvalue", "high_b_value"]
+    adc_candidates = ["adc", "ADC", "adc_reg"]
+    hbv_candidates = ["hbv", "HBV", "highbvalue", "high_b_value", "hbv_reg"]
     zonal_candidates = ["zonal_masks", "zonal", "zonal_pz_tz"]
     
     for name in t2_candidates:

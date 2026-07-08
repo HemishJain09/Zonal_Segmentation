@@ -90,12 +90,12 @@ def convert_picai_to_nnunet(picai_dir: str, nnunet_raw: str, marksheet_path: str
             t2_dir = picai_dir / name
             break
     
-    for name in ["adc", "ADC"]:
+    for name in ["adc", "ADC", "adc_reg"]:
         if (picai_dir / name).exists():
             adc_dir = picai_dir / name
             break
     
-    for name in ["hbv", "HBV", "highbvalue"]:
+    for name in ["hbv", "HBV", "highbvalue", "hbv_reg"]:
         if (picai_dir / name).exists():
             hbv_dir = picai_dir / name
             break
