@@ -1,0 +1,74 @@
+# =============================================================================
+# Frozen Experiment Configuration
+# Prostate Zonal Segmentation using nnU-Net v2
+# =============================================================================
+# WARNING: Do not modify this file after training begins.
+# Any changes must be documented and justified.
+
+project:
+  name: "Prostate Zonal Segmentation"
+  version: "1.0.0"
+  objective: "Cross-centre domain shift quantification for zonal anatomy"
+
+dataset:
+  name: "PI-CAI"
+  id: 501  # nnU-Net Dataset ID (Dataset501_ZonalSeg)
+  dataset_name: "Dataset501_ZonalSeg"
+  total_cases: 1500
+  centres:
+    - RUMC
+    - ZGT
+    - PCNN
+  modalities:
+    0: "T2W"
+    1: "ADC"
+    2: "HBV"
+  # Labels will be determined by Phase 1 characterization
+  # Expected: {0: Background, 1: PZ, 2: TZ}
+  labels: null  # To be filled after running characterize_dataset.py
+
+experimental_design:
+  train_centres: ["RUMC", "ZGT"]
+  test_centre: "PCNN"
+  validation: "5-fold-cv"
+  split_level: "patient"  # Never study-level (prevents follow-up leakage)
+  
+training:
+  architecture: "nnU-Net v2"
+  modifications: "none"  # Vanilla defaults
+  epochs: 250
+  folds_to_train: [0]  # Single fold for baseline; expand to [0,1,2,3,4] for ensemble
+
+metrics:
+  primary:
+    - "Dice"
+  secondary:
+    - "HD95"
+    - "ASD"
+    - "Precision"
+    - "Recall"
+  report_per:
+    - "zone"    # PZ, TZ separately
+    - "centre"  # RUMC, ZGT, PCNN separately
+    - "fold"    # Each CV fold
+
+success_criteria:
+  internal_dice: 0.91
+  external_dice: 0.86
+  domain_gap: 0.05  # Max acceptable Internal - External difference
+
+checkpointing:
+  conversion_cache: "PI-CAI_nnUNet_Raw_Zonal.zip"
+  preprocessed_cache: "PI-CAI_nnUNet_Preprocessed_Zonal.zip"
+  splits_file: "splits_final_zonal.json"
+  results_dir: "nnUNet_results"  # On Drive, auto-resume
+
+precautions:
+  - "PCNN must NEVER be used for hyperparameter tuning"
+  - "PCNN must NEVER be used for early stopping"
+  - "PCNN must NEVER be used for architecture selection"
+  - "Never change preprocessing midway"
+  - "Never change train/test split"
+  - "Never cherry-pick folds"
+  - "Never report only Dice"
+  - "Never modify multiple variables simultaneously"

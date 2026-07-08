@@ -1,0 +1,23 @@
+# Data directories (too large for git)
+nnUNet_raw/
+nnUNet_preprocessed/
+nnUNet_results/
+results/
+logs/
+models/
+test_data/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
