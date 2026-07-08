@@ -135,8 +135,17 @@ def characterize_dataset(picai_dir: str, marksheet_path: str, output_dir: str,
     log("## 2. Centre Distribution")
     log("")
     
-    marksheet = pd.read_csv(marksheet_path)
-    log(f"Total rows in marksheet: {len(marksheet)}")
+    marksheet_path = Path(marksheet_path)
+    if not marksheet_path.exists():
+        log(f"❌ ERROR: Marksheet not found at {marksheet_path}")
+        log("Please update the MARKSHEET path in the Colab notebook.")
+        
+        report_path = output_dir / "dataset_report.md"
+        with open(report_path, "w") as f:
+            f.write("\n".join(report_lines))
+        sys.exit(1)
+        
+    marksheet = pd.read_csv(marksheet_path)    log(f"Total rows in marksheet: {len(marksheet)}")
     log(f"Columns: {list(marksheet.columns)}")
     log("")
     
