@@ -38,6 +38,7 @@ import shutil
 import sys
 from pathlib import Path
 from collections import Counter
+import concurrent.futures
 
 import numpy as np
 import pandas as pd
@@ -161,7 +162,8 @@ def convert_picai_to_nnunet(picai_dir: str, nnunet_raw: str, marksheet_path: str
     all_label_values = Counter()
     n_converted = 0
     
-    for case_id in tqdm(case_ids, desc="Converting"):
+    # Helper function for parallel processing
+    def process_case(case_id):
         t2_file = t2_dir / f"{case_id}.nii.gz"
         adc_file = adc_dir / f"{case_id}.nii.gz"
         hbv_file = hbv_dir / f"{case_id}.nii.gz"
@@ -177,15 +179,17 @@ def convert_picai_to_nnunet(picai_dir: str, nnunet_raw: str, marksheet_path: str
             zonal_file,
             labels_dir / f"{case_id}.nii.gz"
         )
+        return label_vals
         
-        for v in label_vals:
-            all_label_values[int(v)] += 1
+    print(f"Starting parallel conversion using up to 16 threads...")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        futures = {executor.submit(process_case, cid): cid for cid in case_ids}
         
-        n_converted += 1
-        
-        # Memory cleanup every 100 cases
-        if n_converted % 100 == 0:
-            gc.collect()
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(case_ids), desc="Converting"):
+            label_vals = future.result()
+            for v in label_vals:
+                all_label_values[int(v)] += 1
+            n_converted += 1
     
     # Determine labels from observed data
     observed_labels = sorted(all_label_values.keys())
