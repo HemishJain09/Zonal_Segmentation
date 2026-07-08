@@ -145,7 +145,8 @@ def characterize_dataset(picai_dir: str, marksheet_path: str, output_dir: str,
             f.write("\n".join(report_lines))
         sys.exit(1)
         
-    marksheet = pd.read_csv(marksheet_path)    log(f"Total rows in marksheet: {len(marksheet)}")
+    marksheet = pd.read_csv(marksheet_path)    
+    log(f"Total rows in marksheet: {len(marksheet)}")
     log(f"Columns: {list(marksheet.columns)}")
     log("")
     
