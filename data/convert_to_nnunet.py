@@ -50,28 +50,42 @@ except ImportError:
     print("nibabel not installed. Run: pip install nibabel")
     sys.exit(1)
 
+try:
+    import SimpleITK as sitk
+except ImportError:
+    print("SimpleITK not installed. Run: pip install SimpleITK")
+    sys.exit(1)
+
 
 DATASET_NAME = "Dataset501_ZonalSeg"
 
 
-def verify_and_copy_mask(zonal_nifti_path: Path, output_path: Path):
+def verify_and_copy_mask(t2_nifti_path: Path, zonal_nifti_path: Path, output_path: Path):
     """
-    Load a zonal segmentation mask, verify its contents, and save.
-    
-    Expected values: {0: Background, 1: PZ, 2: TZ} (or similar multi-class).
-    Logs warnings for unexpected label values.
+    Load a zonal segmentation mask, rigidly resample it to match the T2 reference
+    geometry (to prevent shape/origin/direction mismatches), and save as uint8.
     """
-    img = nib.load(str(zonal_nifti_path))
-    data = img.get_fdata().astype(np.uint8)
+    # Read images using SimpleITK
+    t2_img = sitk.ReadImage(str(t2_nifti_path))
+    mask_img = sitk.ReadImage(str(zonal_nifti_path))
     
-    unique_vals = np.unique(data)
+    # Resample mask to exactly match T2 grid
+    resampler = sitk.ResampleImageFilter()
+    resampler.SetReferenceImage(t2_img)
+    resampler.SetInterpolator(sitk.sitkNearestNeighbor)  # Nearest neighbor for segmentation masks
+    resampler.SetDefaultPixelValue(0)
     
-    # Save as uint8 NIfTI
-    out_img = nib.Nifti1Image(data, img.affine, img.header)
-    out_img.set_data_dtype(np.uint8)
-    nib.save(out_img, str(output_path))
+    resampled_mask = resampler.Execute(mask_img)
     
-    return unique_vals
+    # Cast to uint8
+    resampled_mask = sitk.Cast(resampled_mask, sitk.sitkUInt8)
+    
+    # Write the resampled mask
+    sitk.WriteImage(resampled_mask, str(output_path))
+    
+    # Get unique label values
+    data = sitk.GetArrayFromImage(resampled_mask)
+    return np.unique(data).tolist()
 
 
 def convert_picai_to_nnunet(picai_dir: str, nnunet_raw: str, marksheet_path: str,
@@ -172,8 +186,9 @@ def convert_picai_to_nnunet(picai_dir: str, nnunet_raw: str, marksheet_path: str
             shutil.copy2(str(adc_file), str(images_dir / f"{case_id}_0001.nii.gz"))
             shutil.copy2(str(hbv_file), str(images_dir / f"{case_id}_0002.nii.gz"))
             
-            # Copy and verify zonal mask
+            # Copy and verify zonal mask (resampling to T2)
             label_vals = verify_and_copy_mask(
+                t2_file,
                 zonal_file,
                 labels_dir / f"{case_id}.nii.gz"
             )
