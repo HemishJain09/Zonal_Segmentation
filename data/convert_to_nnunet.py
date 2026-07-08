@@ -122,21 +122,15 @@ def convert_picai_to_nnunet(picai_dir: str, nnunet_raw: str, marksheet_path: str
     
     # Build case list
     case_ids = []
+    print("Reading cases from marksheet...")
     for _, row in marksheet.iterrows():
         case_id = f"{row.patient_id}_{row.study_id}"
         
         # Filter by centre if specified
         if train_centers and row.center not in train_centers:
             continue
-        
-        # Verify all files exist
-        t2_file = t2_dir / f"{case_id}.nii.gz"
-        adc_file = adc_dir / f"{case_id}.nii.gz"
-        hbv_file = hbv_dir / f"{case_id}.nii.gz"
-        zonal_file = zonal_dir / f"{case_id}.nii.gz"
-        
-        if t2_file.exists() and adc_file.exists() and hbv_file.exists() and zonal_file.exists():
-            case_ids.append(case_id)
+            
+        case_ids.append(case_id)
     
     if max_cases:
         case_ids = case_ids[:max_cases]
@@ -164,22 +158,29 @@ def convert_picai_to_nnunet(picai_dir: str, nnunet_raw: str, marksheet_path: str
     
     # Helper function for parallel processing
     def process_case(case_id):
-        t2_file = t2_dir / f"{case_id}.nii.gz"
-        adc_file = adc_dir / f"{case_id}.nii.gz"
-        hbv_file = hbv_dir / f"{case_id}.nii.gz"
-        zonal_file = zonal_dir / f"{case_id}.nii.gz"
-        
-        # Copy 3 image channels
-        shutil.copy2(str(t2_file), str(images_dir / f"{case_id}_0000.nii.gz"))
-        shutil.copy2(str(adc_file), str(images_dir / f"{case_id}_0001.nii.gz"))
-        shutil.copy2(str(hbv_file), str(images_dir / f"{case_id}_0002.nii.gz"))
-        
-        # Copy and verify zonal mask
-        label_vals = verify_and_copy_mask(
-            zonal_file,
-            labels_dir / f"{case_id}.nii.gz"
-        )
-        return label_vals
+        try:
+            t2_file = t2_dir / f"{case_id}.nii.gz"
+            adc_file = adc_dir / f"{case_id}.nii.gz"
+            hbv_file = hbv_dir / f"{case_id}.nii.gz"
+            zonal_file = zonal_dir / f"{case_id}.nii.gz"
+            
+            if not t2_file.exists() or not zonal_file.exists():
+                return []
+            
+            # Copy 3 image channels
+            shutil.copy2(str(t2_file), str(images_dir / f"{case_id}_0000.nii.gz"))
+            shutil.copy2(str(adc_file), str(images_dir / f"{case_id}_0001.nii.gz"))
+            shutil.copy2(str(hbv_file), str(images_dir / f"{case_id}_0002.nii.gz"))
+            
+            # Copy and verify zonal mask
+            label_vals = verify_and_copy_mask(
+                zonal_file,
+                labels_dir / f"{case_id}.nii.gz"
+            )
+            return label_vals
+        except Exception as e:
+            print(f"Error processing {case_id}: {e}")
+            return []
         
     print(f"Starting parallel conversion using up to 16 threads...")
     with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
