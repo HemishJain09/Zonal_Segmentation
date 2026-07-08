@@ -49,7 +49,7 @@ def generate_splits(nnunet_raw: str, nnunet_preprocessed: str, marksheet_path: s
     
     # Get all case IDs from the converted dataset
     labels_dir = nnunet_raw / DATASET_NAME / "labelsTr"
-    all_cases = sorted([f.stem for f in labels_dir.glob("*.nii.gz")])
+    all_cases = sorted([f.name.replace(".nii.gz", "") for f in labels_dir.glob("*.nii.gz")])
     
     print(f"Total cases in dataset: {len(all_cases)}")
     
