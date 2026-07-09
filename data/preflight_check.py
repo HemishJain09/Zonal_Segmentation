@@ -45,7 +45,17 @@ def run_preflight_check(nnunet_preprocessed: str, dataset_name: str = "Dataset50
     print(f"  - Preprocessed cases found: {len(npy_files)}")
     
     if not npy_files:
-        print("  ❌ No .npy files found in 3d_fullres!")
+        print(f"  ❌ No .npy files found in {data_dir.name}!")
+        print(f"     Contents of {preprocessed_dir.name}:")
+        for f in preprocessed_dir.iterdir():
+            print(f"       - {f.name} (IsDir: {f.is_dir()})")
+            
+        if data_dir.exists():
+            print(f"     Contents of {data_dir.name}:")
+            for f in list(data_dir.glob("*"))[:10]:
+                print(f"       - {f.name}")
+        else:
+            print(f"     Folder {data_dir.name} DOES NOT EXIST!")
     else:
         sample_file = npy_files[0]
         data = np.load(sample_file)
