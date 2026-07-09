@@ -3,20 +3,12 @@
 Evaluation Metrics for Prostate Zonal Segmentation
 ===============================================================================
 Computes per-zone metrics: Dice, HD95, ASD, Precision, Recall
-Supports both internal validation (5-fold CV) and external validation (PCNN).
+Uses Multi-threading to process the distance transforms extremely quickly.
 
 Usage:
-  # Internal validation (fold-by-fold):
-  python evaluation/compute_metrics.py \
-    --predictions /path/to/nnUNet_results/fold_0/validation_raw \
-    --ground_truth /path/to/nnUNet_raw/Dataset501_ZonalSeg/labelsTr \
-    --output_dir /path/to/results \
-    --mode internal
-
-  # External validation (PCNN):
   python evaluation/compute_metrics.py \
     --predictions /path/to/predictions \
-    --ground_truth /path/to/pcnn_labels \
+    --ground_truth /path/to/labels \
     --output_dir /path/to/results \
     --mode external
 ===============================================================================
@@ -26,6 +18,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
+import concurrent.futures
 
 import numpy as np
 import pandas as pd
@@ -38,7 +31,7 @@ except ImportError:
     sys.exit(1)
 
 try:
-    from scipy.ndimage import distance_transform_edt
+    from scipy.ndimage import distance_transform_edt, binary_erosion, generate_binary_structure
 except ImportError:
     print("scipy not installed. Run: pip install scipy")
     sys.exit(1)
@@ -59,18 +52,18 @@ def compute_dice(pred, gt, label):
 
 
 def compute_surface_distances(pred, gt, spacing):
-    """Compute surface distances between prediction and ground truth."""
-    pred_border = pred ^ np.pad(pred, 1, mode='edge')[:-2, :-2, :-2] | \
-                  pred ^ np.pad(pred, 1, mode='edge')[2:, 2:, 2:]
-    gt_border = gt ^ np.pad(gt, 1, mode='edge')[:-2, :-2, :-2] | \
-                gt ^ np.pad(gt, 1, mode='edge')[2:, 2:, 2:]
+    """Compute exact surface distances using morphological erosion."""
+    # Use 3D 6-connectivity for robust border extraction
+    struct = generate_binary_structure(3, 1)
+    pred_border = pred ^ binary_erosion(pred, structure=struct)
+    gt_border = gt ^ binary_erosion(gt, structure=struct)
     
-    # Use distance transform for efficiency
     if not np.any(pred):
         return np.array([]), np.array([])
     if not np.any(gt):
         return np.array([]), np.array([])
     
+    # Distance transforms automatically release the GIL for multi-threading!
     dt_gt = distance_transform_edt(~gt, sampling=spacing)
     dt_pred = distance_transform_edt(~pred, sampling=spacing)
     
@@ -87,7 +80,7 @@ def compute_surface_distances(pred, gt, spacing):
 
 
 def compute_hd95(pred, gt, label, spacing=(1, 1, 1)):
-    """Compute 95th percentile Hausdorff Distance for a specific label."""
+    """Compute true mathematical 95th percentile Hausdorff Distance."""
     pred_mask = (pred == label)
     gt_mask = (gt == label)
     
@@ -101,8 +94,8 @@ def compute_hd95(pred, gt, label, spacing=(1, 1, 1)):
     if len(d1) == 0 or len(d2) == 0:
         return np.inf
     
-    all_distances = np.concatenate([d1, d2])
-    return np.percentile(all_distances, 95)
+    # HD95 is defined as the max of the two directed 95th percentiles
+    return max(np.percentile(d1, 95), np.percentile(d2, 95))
 
 
 def compute_asd(pred, gt, label, spacing=(1, 1, 1)):
@@ -138,74 +131,76 @@ def compute_precision_recall(pred, gt, label):
     return precision, recall
 
 
-def evaluate_case(pred_path, gt_path, labels):
-    """Evaluate a single case across all labels."""
-    pred_img = nib.load(str(pred_path))
-    gt_img = nib.load(str(gt_path))
+def evaluate_single_case_task(pred_file: Path, ground_truth_dir: Path, labels: dict):
+    """Thread-worker function to evaluate a single NIfTI file."""
+    case_id = pred_file.stem.replace(".nii", "")
+    gt_file = ground_truth_dir / f"{case_id}.nii.gz"
     
-    pred = pred_img.get_fdata().astype(np.uint8)
-    gt = gt_img.get_fdata().astype(np.uint8)
+    if not gt_file.exists():
+        return {"case_id": case_id, "error": "Ground truth not found"}
     
-    spacing = gt_img.header.get_zooms()[:3]
-    
-    results = {}
-    for label_name, label_val in labels.items():
-        if label_name == "background":
-            continue  # Skip background metrics
+    try:
+        pred_img = nib.load(str(pred_file))
+        gt_img = nib.load(str(gt_file))
         
-        dice = compute_dice(pred, gt, label_val)
-        hd95 = compute_hd95(pred, gt, label_val, spacing)
-        asd = compute_asd(pred, gt, label_val, spacing)
-        precision, recall = compute_precision_recall(pred, gt, label_val)
+        pred = pred_img.get_fdata().astype(np.uint8)
+        gt = gt_img.get_fdata().astype(np.uint8)
         
-        results[label_name] = {
-            "Dice": dice,
-            "HD95": hd95,
-            "ASD": asd,
-            "Precision": precision,
-            "Recall": recall
-        }
-    
-    return results
+        spacing = gt_img.header.get_zooms()[:3]
+        
+        results = {"case_id": case_id}
+        for label_name, label_val in labels.items():
+            if label_name == "background":
+                continue
+            
+            results[label_name] = {
+                "Dice": compute_dice(pred, gt, label_val),
+                "HD95": compute_hd95(pred, gt, label_val, spacing),
+                "ASD": compute_asd(pred, gt, label_val, spacing),
+                "Precision": compute_precision_recall(pred, gt, label_val)[0],
+                "Recall": compute_precision_recall(pred, gt, label_val)[1]
+            }
+        return results
+    except Exception as e:
+        return {"case_id": case_id, "error": str(e)}
 
 
-def compute_metrics(predictions_dir: str, ground_truth_dir: str, output_dir: str,
-                    mode: str = "internal"):
-    """Compute metrics across all cases."""
+def compute_metrics(predictions_dir: str, ground_truth_dir: str, output_dir: str, mode: str = "internal"):
+    """Compute metrics across all cases in parallel."""
     predictions_dir = Path(predictions_dir)
     ground_truth_dir = Path(ground_truth_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    # Default label mapping (will be adjusted based on dataset)
     labels = {"background": 0, "PZ": 1, "TZ": 2}
-    
-    # Find prediction files
     pred_files = sorted(predictions_dir.glob("*.nii.gz"))
     
     if not pred_files:
         print(f"No prediction files found in {predictions_dir}")
         return
     
-    print(f"Evaluating {len(pred_files)} cases ({mode} validation)")
+    print(f"Evaluating {len(pred_files)} cases with 16-Core PARALLEL PROCESSING ({mode} validation)...")
     
     all_results = []
     
-    for pred_file in tqdm(pred_files, desc="Evaluating"):
-        case_id = pred_file.stem.replace(".nii", "")
-        gt_file = ground_truth_dir / f"{case_id}.nii.gz"
+    # Run heavy distance transforms in parallel across 16 threads
+    with concurrent.futures.ThreadPoolExecutor(max_workers=16) as executor:
+        futures = {
+            executor.submit(evaluate_single_case_task, pf, ground_truth_dir, labels): pf 
+            for pf in pred_files
+        }
         
-        if not gt_file.exists():
-            print(f"  ⚠️ Ground truth not found for {case_id}, skipping")
-            continue
-        
-        try:
-            case_results = evaluate_case(pred_file, gt_file, labels)
-            case_results["case_id"] = case_id
-            all_results.append(case_results)
-        except Exception as e:
-            print(f"  ⚠️ Error evaluating {case_id}: {e}")
+        for future in tqdm(concurrent.futures.as_completed(futures), total=len(futures), desc="Evaluating"):
+            res = future.result()
+            if "error" in res:
+                print(f"  ⚠️ Error evaluating {res['case_id']}: {res['error']}")
+            else:
+                all_results.append(res)
     
+    if not all_results:
+        print("No cases successfully evaluated.")
+        return
+        
     # Build results DataFrame
     rows = []
     for result in all_results:
@@ -232,7 +227,6 @@ def compute_metrics(predictions_dir: str, ground_truth_dir: str, output_dir: str
             std = values.std()
             print(f"  {metric:10s}: {mean:.4f} ± {std:.4f}")
     
-    # Overall (average across zones)
     print(f"\nOverall (mean across PZ + TZ):")
     for metric in ["Dice", "HD95", "ASD", "Precision", "Recall"]:
         values = df[metric].replace([np.inf], np.nan).dropna()
@@ -247,21 +241,18 @@ def compute_metrics(predictions_dir: str, ground_truth_dir: str, output_dir: str
     # Save summary
     summary = {}
     for zone in ["PZ", "TZ", "Overall"]:
-        if zone == "Overall":
-            zone_df = df
-        else:
-            zone_df = df[df["zone"] == zone]
-        
+        zone_df = df if zone == "Overall" else df[df["zone"] == zone]
         summary[zone] = {}
         for metric in ["Dice", "HD95", "ASD", "Precision", "Recall"]:
             values = zone_df[metric].replace([np.inf], np.nan).dropna()
-            summary[zone][metric] = {
-                "mean": float(values.mean()),
-                "std": float(values.std()),
-                "median": float(values.median()),
-                "min": float(values.min()),
-                "max": float(values.max())
-            }
+            if not values.empty:
+                summary[zone][metric] = {
+                    "mean": float(values.mean()),
+                    "std": float(values.std()),
+                    "median": float(values.median()),
+                    "min": float(values.min()),
+                    "max": float(values.max())
+                }
     
     summary_path = output_dir / f"summary_{mode}.json"
     with open(summary_path, "w") as f:
@@ -269,17 +260,15 @@ def compute_metrics(predictions_dir: str, ground_truth_dir: str, output_dir: str
     
     print(f"\n📊 Detailed results: {csv_path}")
     print(f"📋 Summary: {summary_path}")
-    
     return df, summary
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Compute zonal segmentation metrics")
+    parser = argparse.ArgumentParser(description="Compute zonal segmentation metrics (Multi-Threaded)")
     parser.add_argument("--predictions", type=str, required=True)
     parser.add_argument("--ground_truth", type=str, required=True)
     parser.add_argument("--output_dir", type=str, required=True)
-    parser.add_argument("--mode", type=str, default="internal",
-                        choices=["internal", "external"])
+    parser.add_argument("--mode", type=str, default="internal", choices=["internal", "external"])
     
     args = parser.parse_args()
     compute_metrics(args.predictions, args.ground_truth, args.output_dir, args.mode)
