@@ -37,8 +37,16 @@ def main():
     
     from nnunetv2.training.nnUNetTrainer.nnUNetTrainer import nnUNetTrainer
     
+    import json
+    with open(args.plans, 'r') as f:
+        plans_dict = json.load(f)
+        
+    dataset_json_path = Path(args.dataset) / "dataset.json"
+    with open(dataset_json_path, 'r') as f:
+        dataset_json = json.load(f)
+        
     # We just need the dataloader from it
-    nnunet_trainer = nnUNetTrainer(plans_dict=None, plans_file=args.plans, fold=0, dataset_json=None)
+    nnunet_trainer = nnUNetTrainer(plans=plans_dict, configuration="3d_fullres", fold=0, dataset_json=dataset_json)
     nnunet_trainer.dataset_tr = nnunet_trainer.get_tr_and_val_datasets()[0] # get training dataset
     dl_tr, _ = nnunet_trainer.get_dataloaders()
     
