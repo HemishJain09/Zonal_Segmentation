@@ -41,6 +41,10 @@ def main():
     with open(args.plans, 'r') as f:
         plans_dict = json.load(f)
         
+    # Inject missing keys that some specific nnunetv2 forks expect in the plans dict
+    if "continue_training" not in plans_dict:
+        plans_dict["continue_training"] = False
+        
     dataset_json_path = Path(args.dataset) / "dataset.json"
     with open(dataset_json_path, 'r') as f:
         dataset_json = json.load(f)
