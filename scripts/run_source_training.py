@@ -51,6 +51,11 @@ def main():
         
     # We just need the dataloader from it
     nnunet_trainer = nnUNetTrainer(plans=plans_dict, configuration="3d_fullres", fold=0, dataset_json=dataset_json)
+    
+    # Explicitly force the preprocessed paths so nnU-Net doesn't get confused by env vars
+    nnunet_trainer.preprocessed_dataset_folder_base = args.dataset
+    nnunet_trainer.preprocessed_dataset_folder = str(Path(args.dataset) / "nnUNetPlans_3d_fullres")
+    
     nnunet_trainer.dataset_tr = nnunet_trainer.get_tr_and_val_datasets()[0] # get training dataset
     dl_tr, _ = nnunet_trainer.get_dataloaders()
     
