@@ -2,8 +2,12 @@ import argparse
 import torch
 import numpy as np
 import nibabel as nib
+import sys
 from pathlib import Path
 from tqdm import tqdm
+
+# Add project root to python path so we can import local modules
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from tta.session import ContinualTTASession
 

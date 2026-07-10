@@ -1,6 +1,11 @@
 import argparse
 import torch
+import sys
 from pathlib import Path
+
+# Add project root to python path so we can import local modules
+sys.path.append(str(Path(__file__).resolve().parent.parent))
+
 from training.trainer import SourceTrainer
 
 # We need a dummy dataloader that yields batches from the nnU-Net preprocessed data
