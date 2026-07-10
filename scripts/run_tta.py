@@ -60,7 +60,13 @@ def main():
         
         # Run TTA for this patient!
         # The adapter weights update on this patient and carry over to the next
-        segmentation = session.adapt_and_predict(case_id, tensor, k_iterations=args.iterations)
+        segmentation, gate_stats = session.adapt_and_predict(case_id, tensor, k_iterations=args.iterations)
+        
+        # Log Modality Contribution
+        print(f"  Modality Reliability (Gate Weights):")
+        print(f"    T2:  {gate_stats['t2_gate_mean']:.3f}")
+        print(f"    ADC: {gate_stats['adc_gate_mean']:.3f}")
+        print(f"    HBV: {gate_stats['hbv_gate_mean']:.3f}")
         
         # Convert prediction to classes (argmax)
         pred_classes = torch.argmax(segmentation, dim=1).squeeze(0).cpu().numpy().astype(np.uint8)
@@ -69,6 +75,12 @@ def main():
         ref_img = nib.load(in_path / f"{case_id}_0000.nii.gz")
         out_img = nib.Nifti1Image(pred_classes, ref_img.affine, ref_img.header)
         nib.save(out_img, out_path / f"{case_id}.nii.gz")
+        
+    # Save the log of gating weights and losses to a JSON file for visualization
+    import json
+    with open(out_path / "tta_session_log.json", "w") as f:
+        json.dump(session.patient_logs, f, indent=4)
 
     print("\nContinual Adaptation Complete!")
     print(f"Processed {len(session.patient_logs)} patients sequentially.")
+    print(f"Gate statistics saved to {out_path / 'tta_session_log.json'}")

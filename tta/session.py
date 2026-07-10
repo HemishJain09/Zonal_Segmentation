@@ -72,17 +72,34 @@ class ContinualTTASession:
             l_tta.backward()
             self.optimizer.step()
             
-        # 2. Final Inference (predict segmentation)
+        # 2. Final Inference (predict segmentation and get gate values)
         self.network.eval()
         with torch.no_grad():
+            # Get segmentation
             segmentation = self.network.forward_inference(image_tensor)
             
+            # Extract gate values for visualization of modality contribution
+            shared_bottleneck, _ = self.network.backbone.encode(image_tensor)
+            inputs = self.network._get_channel_latents(shared_bottleneck)
+            adapted = {mod: self.network.adapters[mod](inputs[mod]) for mod in self.network.modalities}
+            
+            gate_stats = {}
+            for mod in self.network.modalities:
+                gate_vector = self.network.fusion.gates[mod](adapted[mod])
+                # In ChannelGate, forward() returns x * gate. We can extract the gate 
+                # by computing the mean of the actual MLP output directly:
+                y = self.network.fusion.gates[mod].gap(adapted[mod]).view(1, -1)
+                gate_val = self.network.fusion.gates[mod].mlp(y).mean().item()
+                gate_stats[f"{mod}_gate_mean"] = gate_val
+
         # Log adaptation for this patient
-        self.patient_logs.append({
+        log_entry = {
             "patient_id": patient_id,
             "final_l_self": l_self.item(),
             "final_l_cross": l_cross.item(),
             "final_l_tta": l_tta.item()
-        })
+        }
+        log_entry.update(gate_stats)
+        self.patient_logs.append(log_entry)
             
-        return segmentation
+        return segmentation, gate_stats
